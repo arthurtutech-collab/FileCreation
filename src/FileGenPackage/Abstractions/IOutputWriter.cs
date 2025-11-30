@@ -1,37 +1,47 @@
-namespace FileGenPackage.Abstractions;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
-/// <summary>
-/// Buffered, append-only file writer with atomic header updates for crash-safe recovery.
-/// Header format: first line contains "{page},{rows}" for resume tracking.
-/// </summary>
-public interface IOutputWriter : IAsyncDisposable
+namespace FileGenPackage.Abstractions
 {
     /// <summary>
-    /// Write or update header with current page and row counts.
-    /// Atomic operation - safe for crash recovery.
+    /// Abstraction for append-only file writers that support page-based appends
+    /// with footer tracking for crash recovery.
     /// </summary>
-    Task WriteHeaderAsync(int page, long rows, CancellationToken ct = default);
+    public interface IOutputWriter : IAsyncDisposable
+    {
+        /// <summary>
+        /// Append a page of lines and update the footer atomically.
+        /// Skips if the page number is not greater than the current footer page.
+        /// </summary>
+        /// <param name="page">Page number to append.</param>
+        /// <param name="rows">Row count for this page.</param>
+        /// <param name="lines">Lines of content to append before the footer.</param>
+        /// <param name="ct">Optional cancellation token.</param>
+        Task AppendPageAsync(int page, long rows, IEnumerable<string> lines, CancellationToken ct = default);
+
+        /// <summary>
+        /// Remove the footer (last line) from the file.
+        /// If only the footer exists, deletes the file entirely.
+        /// </summary>
+        /// <param name="ct">Optional cancellation token.</param>
+        Task RemoveFooterAsync(CancellationToken ct = default);
+
+        /// <summary>
+        /// Close the writer. Provided for compatibility; streams are opened per call.
+        /// </summary>
+        Task CloseAsync(CancellationToken ct = default);
+    }
 
     /// <summary>
-    /// Append translated lines to file. Lines should already include newlines.
+    /// Factory abstraction for creating output writers.
     /// </summary>
-    Task AppendLinesAsync(IEnumerable<string> lines, CancellationToken ct = default);
-
-    /// <summary>
-    /// Remove header before finalization.
-    /// </summary>
-    Task RemoveHeaderAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// Flush pending writes and close file safely.
-    /// </summary>
-    Task CloseAsync(CancellationToken ct = default);
-}
-
-/// <summary>
-/// Factory for creating writers per output file.
-/// </summary>
-public interface IOutputWriterFactory
-{
-    IOutputWriter CreateWriter(string filePath, string fileId);
+    public interface IOutputWriterFactory
+    {
+        /// <summary>
+        /// Create a new output writer for the given file path and identifier.
+        /// </summary>
+        IOutputWriter CreateWriter(string filePath, string fileId);
+    }
 }

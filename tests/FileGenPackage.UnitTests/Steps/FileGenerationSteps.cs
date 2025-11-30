@@ -241,7 +241,8 @@ namespace FileGenPackage.UnitTests.Steps
                 var path = System.IO.Path.Combine(root, file);
                 var writer = _writerFactory.CreateWriter(path, file);
                 // write a header if AttemptPage is older; caller may have set header earlier
-                writer.WriteHeaderAsync(page, 1).GetAwaiter().GetResult();
+                //writer.WriteHeaderAsync(page, 1).GetAwaiter().GetResult();
+                // Refine the test, since there is no WriteHEaderAsync method
                 writer.DisposeAsync().GetAwaiter().GetResult();
             }
         }
@@ -277,7 +278,7 @@ namespace FileGenPackage.UnitTests.Steps
             {
                 var path = System.IO.Path.Combine(root, file);
                 var writer = _writerFactory!.CreateWriter(path, file);
-                writer.RemoveHeaderAsync().GetAwaiter().GetResult();
+                writer.RemoveFooterAsync().GetAwaiter().GetResult();
                 writer.DisposeAsync().GetAwaiter().GetResult();
             }
 

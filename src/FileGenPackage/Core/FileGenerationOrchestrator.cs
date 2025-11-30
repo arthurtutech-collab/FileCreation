@@ -205,8 +205,7 @@ public class FileGenerationOrchestrator
 
             await using var writer = _writerFactory.CreateWriter(filePath, fileConfig.FileId);
 
-            await writer.WriteHeaderAsync(pageNum, cumulativeRows, ct);
-            await writer.AppendLinesAsync(translatedLines, ct);
+            await writer.AppendPageAsync(pageNum, cumulativeRows, translatedLines, ct);
             await writer.CloseAsync(ct);
 
             await _progressStore.UpsertProgressAsync(fileConfig.FileId, pageNum, cumulativeRows, ct);
@@ -235,7 +234,7 @@ public class FileGenerationOrchestrator
                 if (File.Exists(filePath))
                 {
                     await using var writer = _writerFactory.CreateWriter(filePath, fileConfig.FileId);
-                    await writer.RemoveHeaderAsync(ct);
+                    await writer.RemoveFooterAsync(ct);
                     await writer.CloseAsync(ct);
                 }
 

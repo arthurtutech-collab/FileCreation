@@ -144,15 +144,16 @@ Pod 1 (LoanWorker)          Pod 2 (LoanWorker)          Pod 3 (LoanWorker)
 ### Crash-Resume via File Headers
 
 ```
-Before Crash: File Header = "5,50000" (page 5, 50k rows)
-              ├─ Line 1: 5,50000
-              ├─ Line 2: Data from rows 40001-50000
-              └─ ...
+Before Crash: File Footer = "5,50000" (page 5, 50k rows)
+              ├─ Line 1: Data from rows 40001-50000
+              ├─ Line 2: 
+              ├─......
+              └─ Line Footer: 5,50000
 
 Crash during page 6 processing
 
 After Restart:
-  Pod 2 acquires leadership → reads file headers
+  Pod 2 acquires leadership → reads file footers
   Finds: Loan0 = page 5, Loan1 = page 4, Loan2 = page 5
   Resumes from: min(4,5,5) + 1 = page 5 (NO re-processing!)
 ```
