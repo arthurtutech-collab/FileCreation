@@ -67,11 +67,6 @@ public static class FileGenerationServiceCollectionExtensions
         // Orchestrator (reusable)
         services.AddSingleton<FileGenerationOrchestrator>();
 
-        // Main hosted service (optional)
-        if (registerHostedService)
-        {
-            services.AddHostedService<FileGenerationHostedService>();
-        }
 
         // Health checks
         services.AddHealthChecks()
