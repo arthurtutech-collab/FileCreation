@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using TechTalk.SpecFlow;
 using Xunit;
 
@@ -8,6 +9,10 @@ namespace FileGenPackage.UnitTests.Steps
     public class FileGenerationSteps
     {
         private readonly ScenarioContext _context;
+        private FileGenPackage.Abstractions.IProgressStore? _progressStore;
+        private FileGenPackage.Abstractions.ILeaseStore? _leaseStore;
+        private FileGenPackage.Abstractions.IOutputWriterFactory? _writerFactory;
+        private FileGenPackage.UnitTests.Helpers.InMemoryPageReader? _pageReader;
 
         public FileGenerationSteps(ScenarioContext context)
         {
@@ -18,6 +23,30 @@ namespace FileGenPackage.UnitTests.Steps
         public void GivenAWorkerConfigurationExists()
         {
             _context["WorkerConfigPresent"] = true;
+
+            // If Testcontainers provided the ProgressStore/LeaseStore, prefer them
+            if (_context.TryGetValue("ProgressStore", out var ps))
+            {
+                _progressStore = ps as FileGenPackage.Abstractions.IProgressStore;
+            }
+
+            if (_context.TryGetValue("LeaseStore", out var ls))
+            {
+                _leaseStore = ls as FileGenPackage.Abstractions.ILeaseStore;
+            }
+
+            if (_context.TryGetValue("WriterFactory", out var wf))
+            {
+                _writerFactory = wf as FileGenPackage.Abstractions.IOutputWriterFactory;
+            }
+            else
+            {
+                // fallback: make writer factory that writes to temp folder
+                var outRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "filegen_tests_fallback");
+                System.IO.Directory.CreateDirectory(outRoot);
+                _context["OutputRoot"] = outRoot;
+                _writerFactory = new FileGenPackage.Infrastructure.BufferedFileWriterFactory(Microsoft.Extensions.Logging.Abstractions.NullLogger<FileGenPackage.Infrastructure.BufferedFileWriterFactory>.Instance);
+            }
         }
 
         [Given(@"a Kafka ""(?<eventName>.*)"" event arrives for date ""(?<date>.*)""")]
@@ -58,12 +87,23 @@ namespace FileGenPackage.UnitTests.Steps
         public void GivenSqlPageContainsRows(int page)
         {
             _context["FetchedPage"] = page;
+            // Prepare a simple in-memory page for the test
+            var row = new Dictionary<string, object?> { ["id"] = 1, ["value"] = "r1" };
+            var pages = new[] { new[] { row } };
+            _pageReader = new FileGenPackage.UnitTests.Helpers.InMemoryPageReader(pages);
+            _context["PageReader"] = _pageReader;
         }
 
         [When(@"the worker fetches page (?<page>\d+) from SQL")]
         public void WhenWorkerFetchesPage(int page)
         {
             _context["FetchedPageAtRuntime"] = page;
+            // actually read using the in-memory reader
+            if (_pageReader != null)
+            {
+                var rows = _pageReader.ReadPageAsync(page).GetAwaiter().GetResult();
+                _context["FetchedRows"] = rows;
+            }
         }
 
         [Then(@"the worker uses the same fetched rows R to translate and write to files A, B and C")]
@@ -76,6 +116,11 @@ namespace FileGenPackage.UnitTests.Steps
         public void GivenLeaderStartedProcessing()
         {
             _context["LeaderStarted"] = true;
+            // If ProgressStore is available, mark a start for a sample file
+            if (_progressStore != null)
+            {
+                _progressStore.SetStartAsync("Loan0").GetAwaiter().GetResult();
+            }
         }
 
         [Given(@"the leader dies mid-run without finalizing files")]
@@ -88,13 +133,26 @@ namespace FileGenPackage.UnitTests.Steps
         public void GivenLeaseExpired()
         {
             _context["LeaseExpired"] = true;
+            // If LeaseStore available, release the lease if present to simulate expiry
+            if (_leaseStore != null)
+            {
+                // no-op: we rely on TryAcquire in the When step to succeed for takeover
+            }
         }
 
         [When(@"another pod detects leases expired and attempts to acquire leadership")]
         public void WhenAnotherPodAttemptsAcquire()
         {
             if (_context.ContainsKey("LeaseExpired") && (bool)_context["LeaseExpired"]) {
-                _context["Acquired"] = true;
+                if (_leaseStore != null)
+                {
+                    var acquired = _leaseStore.TryAcquireAsync("worker1", "instance-b", TimeSpan.FromMinutes(1)).GetAwaiter().GetResult();
+                    _context["Acquired"] = acquired;
+                }
+                else
+                {
+                    _context["Acquired"] = true; // assume acquisition in mocked environment
+                }
             }
         }
 
@@ -102,6 +160,12 @@ namespace FileGenPackage.UnitTests.Steps
         public void ThenNewLeaderReadsProgress()
         {
             Assert.True(_context.ContainsKey("Acquired") && (bool)_context["Acquired"]);
+            // attempt to read min outstanding page if progress store is available
+            if (_progressStore != null)
+            {
+                var min = _progressStore.GetMinOutstandingPageAsync("worker1").GetAwaiter().GetResult();
+                _context["MinOutstanding"] = min;
+            }
         }
 
         [Given(@"file \"(?<file>.*)\" header indicates last processed page = (?<page>\d+)")]
@@ -115,6 +179,15 @@ namespace FileGenPackage.UnitTests.Steps
         {
             _context["AttemptPage"] = page;
             _context["AttemptFile"] = file;
+            // If writer factory is present, write a header to simulate prior progress
+            if (_writerFactory != null && _context.TryGetValue("OutputRoot", out var rootObj) && rootObj is string root)
+            {
+                var path = System.IO.Path.Combine(root, file);
+                var writer = _writerFactory.CreateWriter(path, file);
+                // write a header if AttemptPage is older; caller may have set header earlier
+                writer.WriteHeaderAsync(page, 1).GetAwaiter().GetResult();
+                writer.DisposeAsync().GetAwaiter().GetResult();
+            }
         }
 
         [Then(@"the worker detects the header progress is beyond page (?<page>\d+)")]
@@ -143,6 +216,22 @@ namespace FileGenPackage.UnitTests.Steps
         public void WhenFinalizationTriggered(string file)
         {
             _context[$"Finalized_{file}"] = true;
+            // Simulate finalization: remove header and mark completed in progress store
+            if (_context.TryGetValue("OutputRoot", out var rootObj) && rootObj is string root)
+            {
+                var path = System.IO.Path.Combine(root, file);
+                var writer = _writerFactory!.CreateWriter(path, file);
+                writer.RemoveHeaderAsync().GetAwaiter().GetResult();
+                writer.DisposeAsync().GetAwaiter().GetResult();
+            }
+
+            if (_progressStore != null)
+            {
+                _progressStore.SetCompletedAsync(file).GetAwaiter().GetResult();
+            }
+
+            // Simulate publishing event
+            _context["PublishedEvent"] = true;
         }
 
         [Then(@"the worker removes or clears the progress header for that file")]
