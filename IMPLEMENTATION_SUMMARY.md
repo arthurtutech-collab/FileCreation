@@ -31,7 +31,7 @@ This is a complete, production-grade C# implementation of the File Generation Ho
 - `LivenessHealthCheck` - OCP liveness probe (heartbeat + progress monitoring)
 
 **Core** (`Core/`):
-- `FileGenerationHostedService` - Main BackgroundService orchestrating:
+- `FileGenerationOrchestrator` - Main orchestrating:
   - Leadership acquisition and heartbeat renewal
   - Daily trigger guard (one run per day)
   - SQL pagination with concurrent file translation
