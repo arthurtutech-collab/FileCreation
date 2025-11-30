@@ -3,7 +3,6 @@ using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using MongoDB.Driver;
-using TechTalk.SpecFlow;
 using Testcontainers.MongoDb;
 using FileGenPackage.Infrastructure;
 

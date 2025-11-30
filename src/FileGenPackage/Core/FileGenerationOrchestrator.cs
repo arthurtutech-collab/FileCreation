@@ -121,9 +121,17 @@ public class FileGenerationOrchestrator
     {
         _logger.LogInformation("Starting file processing");
 
+        // Determine resume page: get the minimum page across all files to avoid skipping any file
+        var resumeFromPage = await _progressStore.GetMinOutstandingPageAsync(_config.WorkerId, ct);
+        
+        // Only set start for files not yet started
         foreach (var fileConfig in _config.Files)
         {
-            await _progressStore.SetStartAsync(fileConfig.FileId, ct);
+            var progress = await _progressStore.GetAsync(fileConfig.FileId, ct);
+            if (progress == null)
+            {
+                await _progressStore.SetStartAsync(fileConfig.FileId, ct);
+            }
         }
 
         try
@@ -132,8 +140,9 @@ public class FileGenerationOrchestrator
             var totalPages = (int)Math.Ceiling((double)totalRows / _config.Sql.PageSize);
 
             _logger.LogInformation("Total rows: {TotalRows}, total pages: {TotalPages}", totalRows, totalPages);
+            _logger.LogInformation("Resuming from page {ResumePage}", resumeFromPage);
 
-            for (int pageNum = 0; pageNum < totalPages && _isLeader; pageNum++)
+            for (int pageNum = resumeFromPage; pageNum < totalPages && _isLeader; pageNum++)
             {
                 var lease = await _leaseStore.GetLeaseAsync(_config.WorkerId, ct);
                 if (lease?.InstanceId != _instanceId)
