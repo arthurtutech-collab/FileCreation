@@ -154,7 +154,7 @@ Crash during page 6 processing
 After Restart:
   Pod 2 acquires leadership → reads file headers
   Finds: Loan0 = page 5, Loan1 = page 4, Loan2 = page 5
-  Resumes from: max(4,5,5) + 1 = page 6 (NO re-processing!)
+  Resumes from: min(4,5,5) + 1 = page 5 (NO re-processing!)
 ```
 
 ### Per-File Translation
